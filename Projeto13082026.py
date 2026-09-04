@@ -7,217 +7,500 @@ import customtkinter as ctk
 from PIL import Image
 import requests
 
+# Configuração de Tema Dark Moderno
 ctk.set_appearance_mode("Dark")
-ctk.set_default_color_theme("blue")
+ctk.set_default_color_theme("dark-blue")
 
 
 def limpar_html(texto):
-    """Remove tags HTML (como <br>, <i>) do texto da sinopse."""
+    """Remove tags HTML do texto da sinopse."""
     if not texto:
         return "Sinopse não disponível para este anime."
     clean = re.compile("<.*?>")
     return re.sub(clean, "", texto)
 
 
-class AppPainelRedimensionavel(ctk.CTk):
+class AppCalendarioAnime(ctk.CTk):
 
     DIAS_DA_SEMANA = [
-        ("Segunda-feira", 0),
-        ("Terça-feira", 1),
-        ("Quarta-feira", 2),
-        ("Quinta-feira", 3),
-        ("Sexta-feira", 4),
-        ("Sábado", 5),
-        ("Domingo", 6),
+        ("SEGUNDA", "MON", 0),
+        ("TERÇA", "TUE", 1),
+        ("QUARTA", "WED", 2),
+        ("QUINTA", "THU", 3),
+        ("SEXTA", "FRI", 4),
+        ("SÁBADO", "SAT", 5),
+        ("DOMINGO", "SUN", 6),
     ]
+
+    GENEROS_DISPONIVEIS = [
+        "Todos", "Action", "Adventure", "Comedy", "Drama", 
+        "Fantasy", "Horror", "Mecha", "Mystery", "Romance", 
+        "Sci-Fi", "Slice of Life", "Sports", "Supernatural", "Thriller"
+    ]
+
+    # Paleta de Cores
+    COLOR_BG = "#0B0E14"           # Fundo Principal
+    COLOR_SIDEBAR = "#121824"      # Fundo do Sidebar
+    COLOR_CARD = "#1A2332"         # Fundo dos Cards
+    COLOR_ACCENT = "#00A8FF"       # Azul Neon
+    COLOR_TEXT_MAIN = "#FFFFFF"    # Texto Primário
+    COLOR_TEXT_MUTED = "#8A99AD"   # Texto Secundário
 
     def __init__(self):
         super().__init__()
-        self.title("Calendário de Animes - AniList API")
-        self.geometry("950x700")
+        self.title("CALENDÁRIO DE LANÇAMENTOS | SÉRIES & ANIME")
+        self.geometry("1100x720")
+        self.configure(fg_color=self.COLOR_BG)
 
+        # Gerenciamento de Estado de Favoritos / Minha Lista
+        # Armazena dicionários de animes indexados pelo ID: { anime_id: anime_data }
+        self.favoritos = {}
+
+        # Estado da Navegação e Filtros
+        self.aba_atual = "dashboard"
+        self.dia_selecionado = datetime.datetime.now().weekday()
+        self.botoes_dias = {}
+        self.botoes_menu = {}
+
+        # Layout Principal: Sidebar + Conteúdo
+        self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        self.largura_minima = 160
-        self.largura_maxima = 400
-        self.largura_atual = 220
+        self.setup_sidebar()
+        self.setup_main_area()
 
-        # ================= 1. PAINEL LATERAL =================
-        self.sidebar = ctk.CTkFrame(self, width=self.largura_atual, corner_radius=0)
+        # Iniciar no Dashboard
+        self.mudar_aba("dashboard")
+
+    # ================= 1. CRIAÇÃO DO SIDEBAR (MENU LATERAL) =================
+    def setup_sidebar(self):
+        self.sidebar = ctk.CTkFrame(
+            self, width=220, corner_radius=0, fg_color=self.COLOR_SIDEBAR
+        )
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-
         self.sidebar.pack_propagate(False)
-        self.sidebar.grid_propagate(False)
-        self.sidebar.grid_columnconfigure(0, weight=1)
 
-        # ---------------- 7 BOTÕES (SEGUNDA A DOMINGO) ----------------
-        self.botoes = {}
+        # Logo / Ícone Superior
+        lbl_logo = ctk.CTkLabel(
+            self.sidebar,
+            text="▶",
+            font=ctk.CTkFont(size=32, weight="bold"),
+            text_color=self.COLOR_ACCENT,
+        )
+        lbl_logo.pack(pady=(25, 20))
 
-        for index, (nome_dia, dia_num) in enumerate(self.DIAS_DA_SEMANA):
-            self.sidebar.grid_rowconfigure(index, weight=1)
+        # Menu de Navegação
+        itens_menu = [
+            ("🏠 Dashboard", "dashboard"),
+            ("📅 Meu Calendário", "calendario"),
+            ("🔍 Explorar", "explorar"),
+            ("⭐ Populares", "populares"),
+            ("⚙️ Configurações", "configuracoes"),
+        ]
 
+        for texto, chave in itens_menu:
             btn = ctk.CTkButton(
                 self.sidebar,
-                text=f"📅 {nome_dia}",
-                command=lambda d_num=dia_num, n_dia=nome_dia: self.ao_clicar_botao(
-                    d_num, n_dia
-                ),
+                text=texto,
+                anchor="w",
+                height=40,
+                corner_radius=8,
+                font=ctk.CTkFont(size=13, weight="normal"),
+                fg_color="transparent",
+                text_color=self.COLOR_TEXT_MUTED,
+                hover_color="#1E293B",
+                command=lambda k=chave: self.mudar_aba(k),
             )
-            btn.grid(row=index, column=0, sticky="nsew", padx=10, pady=5)
-            self.botoes[f"btn_dia_{dia_num}"] = btn
+            btn.pack(fill="x", padx=15, pady=4)
+            self.botoes_menu[chave] = btn
 
-        # ================= 2. BARRA DIVISÓRIA (SPLITTER) =================
-        self.splitter = ctk.CTkFrame(
-            self, width=6, cursor="sb_h_double_arrow", fg_color="#374151"
+        # Perfil do Usuário no Rodapé
+        frame_perfil = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        frame_perfil.pack(side="bottom", fill="x", padx=15, pady=20)
+
+        lbl_perfil_icon = ctk.CTkLabel(
+            frame_perfil, text="👤", font=ctk.CTkFont(size=20)
         )
-        self.splitter.grid(row=0, column=1, sticky="nsew")
-        self.splitter.bind("<B1-Motion>", self.arrastar_divisoria)
+        lbl_perfil_icon.pack(side="left", padx=(0, 10))
 
-        # ================= 3. CONTEÚDO PRINCIPAL =================
-        self.main_frame = ctk.CTkFrame(self, corner_radius=0)
-        self.main_frame.grid(row=0, column=2, sticky="nsew")
-        self.grid_columnconfigure(2, weight=1)
+        frame_user_info = ctk.CTkFrame(frame_perfil, fg_color="transparent")
+        frame_user_info.pack(side="left")
+
+        lbl_user_name = ctk.CTkLabel(
+            frame_user_info,
+            text="PERFIL",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color=self.COLOR_TEXT_MAIN,
+        )
+        lbl_user_name.pack(anchor="w")
+
+        lbl_user_status = ctk.CTkLabel(
+            frame_user_info,
+            text="Usuário Conectado",
+            font=ctk.CTkFont(size=10),
+            text_color=self.COLOR_TEXT_MUTED,
+        )
+        lbl_user_status.pack(anchor="w")
+
+    # ================= 2. CRIAÇÃO DA ÁREA PRINCIPAL =================
+    def setup_main_area(self):
+        self.main_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.main_frame.grid(row=0, column=1, sticky="nsew", padx=25, pady=20)
 
         self.main_frame.grid_columnconfigure(0, weight=1)
-        self.main_frame.grid_rowconfigure(1, weight=1)
+        self.main_frame.grid_rowconfigure(2, weight=1)
 
-        self.lbl_main = ctk.CTkLabel(
+        # Cabeçalho Principal
+        self.lbl_header = ctk.CTkLabel(
             self.main_frame,
-            text="Selecione um dia da semana no menu lateral",
-            font=ctk.CTkFont(size=20, weight="bold"),
+            text="CALENDÁRIO DE LANÇAMENTOS | SÉRIES & ANIME",
+            font=ctk.CTkFont(size=22, weight="bold"),
+            text_color=self.COLOR_TEXT_MAIN,
+            anchor="w",
         )
-        self.lbl_main.grid(row=0, column=0, pady=20, padx=20, sticky="w")
+        self.lbl_header.grid(row=0, column=0, sticky="w", pady=(0, 15))
 
-        self.scroll_frame = ctk.CTkScrollableFrame(
-            self.main_frame, label_text="Animes Agendados (Clique em um card para ver detalhes)"
+        # Container Secundário para Filtros/Dias (Linha 1)
+        self.frame_top_controls = ctk.CTkFrame(self.main_frame, fg_color="transparent")
+        self.frame_top_controls.grid(row=1, column=0, sticky="ew", pady=(0, 15))
+
+        # Container Rolar de Cards / Conteúdo (Linha 2)
+        self.scroll_cards = ctk.CTkScrollableFrame(
+            self.main_frame, fg_color="transparent"
         )
-        self.scroll_frame.grid(row=1, column=0, sticky="nsew", padx=20, pady=(0, 20))
+        self.scroll_cards.grid(row=2, column=0, sticky="nsew")
 
-    # ================= MÉTODOS DE FUNCIONALIDADE =================
+        for i in range(4):
+            self.scroll_cards.grid_columnconfigure(i, weight=1)
 
-    def arrastar_divisoria(self, event):
-        x_mouse_janela = event.x_root - self.winfo_rootx()
-        if self.largura_minima <= x_mouse_janela <= self.largura_maxima:
-            self.sidebar.configure(width=x_mouse_janela)
+    # ================= GERENCIADOR DE ABAS =================
+    def mudar_aba(self, chave_aba):
+        self.aba_atual = chave_aba
 
-    def ao_clicar_botao(self, dia_num, nome_dia):
-        self.lbl_main.configure(
-            text=f"⏳ Buscando animes de {nome_dia} na AniList..."
-        )
+        # Atualiza a interface visual dos botões da sidebar
+        for k, btn in self.botoes_menu.items():
+            if k == chave_aba:
+                btn.configure(fg_color="#1E293B", text_color=self.COLOR_ACCENT, font=ctk.CTkFont(size=13, weight="bold"))
+            else:
+                btn.configure(fg_color="transparent", text_color=self.COLOR_TEXT_MUTED, font=ctk.CTkFont(size=13, weight="normal"))
 
-        for widget in self.scroll_frame.winfo_children():
-            widget.destroy()
+        # Limpar controles superiores e grid de conteúdo
+        for w in self.frame_top_controls.winfo_children():
+            w.destroy()
+        for w in self.scroll_cards.winfo_children():
+            w.destroy()
 
+        # Renderizar de acordo com a aba selecionada
+        if chave_aba == "dashboard":
+            self.lbl_header.configure(text="🏠 DASHBOARD DE LANÇAMENTOS")
+            self.setup_bar_dias()
+            self.selecionar_dia(self.dia_selecionado)
+
+        elif chave_aba == "calendario":
+            self.lbl_header.configure(text="📅 MEU CALENDÁRIO (FAVORITOS)")
+            self.carregar_meu_calendario()
+
+        elif chave_aba == "explorar":
+            self.lbl_header.configure(text="🔍 EXPLORAR ANIMES")
+            self.setup_filtros_explorar()
+            self.executar_busca_explorar()
+
+        elif chave_aba == "populares":
+            self.lbl_header.configure(text="⭐ POPULARES DOS ÚLTIMOS 3 MESES")
+            self.carregar_populares_3_meses()
+
+        elif chave_aba == "configuracoes":
+            self.lbl_header.configure(text="⚙️ CONFIGURAÇÕES DO SISTEMA")
+            self.setup_tela_configuracoes()
+
+    # ================= LÓGICA DE FAVORITOS / "MEU CALENDÁRIO" =================
+    def alternar_favorito(self, anime):
+        anime_id = anime["id"]
+        if anime_id in self.favoritos:
+            del self.favoritos[anime_id]
+        else:
+            self.favoritos[anime_id] = anime
+
+        # Se estiver no "Meu Calendário", re-renderiza a lista imediatamente
+        if self.aba_atual == "calendario":
+            self.carregar_meu_calendario()
+
+    def carregar_meu_calendario(self):
+        lista_favs = list(self.favoritos.values())
+        self.renderizar_cards(lista_favs, modo_meu_calendario=True)
+
+    # ================= 3. ABA: DASHBOARD / CALENDÁRIO GERAL =================
+    def setup_bar_dias(self):
+        for idx in range(7):
+            self.frame_top_controls.grid_columnconfigure(idx, weight=1)
+
+        for nome_pt, nome_en, num_dia in self.DIAS_DA_SEMANA:
+            btn = ctk.CTkButton(
+                self.frame_top_controls,
+                text=f"{nome_pt}\n{nome_en}",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                height=50,
+                corner_radius=10,
+                fg_color=self.COLOR_CARD,
+                text_color=self.COLOR_TEXT_MUTED,
+                hover_color="#243044",
+                command=lambda d=num_dia: self.selecionar_dia(d),
+            )
+            btn.grid(row=0, column=num_dia, padx=4, sticky="ew")
+            self.botoes_dias[num_dia] = btn
+
+    def selecionar_dia(self, num_dia):
+        self.dia_selecionado = num_dia
+
+        for d, btn in self.botoes_dias.items():
+            if d == num_dia:
+                btn.configure(fg_color=self.COLOR_ACCENT, text_color="#FFFFFF")
+            else:
+                btn.configure(fg_color=self.COLOR_CARD, text_color=self.COLOR_TEXT_MUTED)
+
+        self.mostrar_loading()
         threading.Thread(
-            target=self.buscar_animes_anilist,
-            args=(dia_num, nome_dia),
-            daemon=True,
+            target=self.buscar_animes_anilist, args=(num_dia,), daemon=True
         ).start()
 
-    def buscar_animes_anilist(self, dia_num, nome_dia):
-        """Consulta AniList buscando dados completos incluindo sinopse, estúdio e links externos."""
+    def buscar_animes_anilist(self, dia_num):
         url = "https://graphql.anilist.co"
-
-        # Consulta GraphQL expandida
         query = """
         query {
-          Page(page: 1, perPage: 100) {
+          Page(page: 1, perPage: 50) {
             media(status: RELEASING, type: ANIME, sort: POPULARITY_DESC) {
               id
-              title {
-                romaji
-                english
-                native
-              }
-              coverImage {
-                large
-                extraLarge
-              }
-              bannerImage
+              title { english romaji native }
+              coverImage { extraLarge large }
               averageScore
               episodes
               genres
-              status
-              seasonYear
               description(asHtml: false)
-              trailer {
-                id
-                site
-              }
-              studios(isMain: true) {
-                nodes {
-                  name
-                }
-              }
-              externalLinks {
-                site
-                url
-                type
-                icon
-              }
-              nextAiringEpisode {
-                airingAt
-                episode
-              }
-              startDate {
-                year
-                month
-                day
-              }
+              trailer { id site }
+              nextAiringEpisode { airingAt episode }
+              startDate { year month day }
             }
           }
         }
         """
-
         try:
-            response = requests.post(url, json={"query": query}, timeout=12)
-
+            response = requests.post(url, json={"query": query}, timeout=10)
             if response.status_code == 200:
-                dados = (
-                    response.json()
-                    .get("data", {})
-                    .get("Page", {})
-                    .get("media", [])
-                )
-
-                animes_do_dia = []
+                dados = response.json().get("data", {}).get("Page", {}).get("media", [])
+                animes_filtrados = []
 
                 for anime in dados:
                     next_ep = anime.get("nextAiringEpisode")
-
                     if next_ep and "airingAt" in next_ep:
-                        timestamp = next_ep["airingAt"]
-                        dt = datetime.datetime.fromtimestamp(timestamp)
+                        dt = datetime.datetime.fromtimestamp(next_ep["airingAt"])
                         if dt.weekday() == dia_num:
-                            animes_do_dia.append(anime)
+                            animes_filtrados.append(anime)
                     else:
                         st = anime.get("startDate", {})
                         if st.get("year") and st.get("month") and st.get("day"):
                             try:
                                 dt = datetime.date(st["year"], st["month"], st["day"])
                                 if dt.weekday() == dia_num:
-                                    animes_do_dia.append(anime)
+                                    animes_filtrados.append(anime)
                             except ValueError:
                                 pass
 
-                # Pré-carrega as capas
-                for anime in animes_do_dia:
+                for anime in animes_filtrados:
                     cover_url = anime.get("coverImage", {}).get("large")
-                    anime["pil_image"] = self.baixar_imagem_pil(cover_url)
+                    anime["pil_image"] = self.baixar_imagem(cover_url)
 
-                self.after(
-                    0, lambda: self.exibir_animes(animes_do_dia, nome_dia)
-                )
-            else:
-                msg = f"Erro HTTP {response.status_code}: Servidor AniList indisponível."
-                self.after(0, lambda: self.lbl_main.configure(text=msg))
-
+                self.after(0, lambda: self.renderizar_cards(animes_filtrados))
         except Exception as e:
-            self.after(
-                0, lambda: self.lbl_main.configure(text=f"Erro de conexão: {e}")
-            )
+            self.after(0, lambda: self.exibir_erro(f"Erro de conexão ao buscar animes: {e}"))
 
-    def baixar_imagem_pil(self, url):
+    # ================= 4. ABA: EXPLORAR (BUSCA & GÊNEROS) =================
+    def setup_filtros_explorar(self):
+        self.frame_top_controls.grid_columnconfigure(0, weight=3)
+        self.frame_top_controls.grid_columnconfigure(1, weight=1)
+        self.frame_top_controls.grid_columnconfigure(2, weight=1)
+
+        self.entry_busca = ctk.CTkEntry(
+            self.frame_top_controls,
+            placeholder_text="Digite o nome do anime...",
+            height=40,
+            fg_color=self.COLOR_CARD,
+            border_color="#243044",
+            text_color=self.COLOR_TEXT_MAIN
+        )
+        self.entry_busca.grid(row=0, column=0, padx=(0, 10), sticky="ew")
+        self.entry_busca.bind("<Return>", lambda e: self.executar_busca_explorar())
+
+        self.combo_genero = ctk.CTkOptionMenu(
+            self.frame_top_controls,
+            values=self.GENEROS_DISPONIVEIS,
+            height=40,
+            fg_color=self.COLOR_CARD,
+            button_color=self.COLOR_ACCENT,
+            dropdown_fg_color=self.COLOR_CARD,
+            text_color=self.COLOR_TEXT_MAIN
+        )
+        self.combo_genero.grid(row=0, column=1, padx=(0, 10), sticky="ew")
+
+        btn_buscar = ctk.CTkButton(
+            self.frame_top_controls,
+            text="Buscar",
+            height=40,
+            fg_color=self.COLOR_ACCENT,
+            font=ctk.CTkFont(weight="bold"),
+            command=self.executar_busca_explorar
+        )
+        btn_buscar.grid(row=0, column=2, sticky="ew")
+
+    def executar_busca_explorar(self):
+        texto = self.entry_busca.get().strip() if hasattr(self, 'entry_busca') else ""
+        genero = self.combo_genero.get() if hasattr(self, 'combo_genero') else "Todos"
+        
+        self.mostrar_loading()
+        threading.Thread(
+            target=self.api_buscar_explorar, args=(texto, genero), daemon=True
+        ).start()
+
+    def api_buscar_explorar(self, termo, genero):
+        url = "https://graphql.anilist.co"
+        query = """
+        query ($search: String, $genre: String) {
+          Page(page: 1, perPage: 28) {
+            media(search: $search, genre: $genre, type: ANIME, sort: POPULARITY_DESC) {
+              id
+              title { english romaji native }
+              coverImage { extraLarge large }
+              averageScore
+              episodes
+              genres
+              description(asHtml: false)
+              trailer { id site }
+              nextAiringEpisode { airingAt episode }
+            }
+          }
+        }
+        """
+        variables = {}
+        if termo:
+            variables["search"] = termo
+        if genero and genero != "Todos":
+            variables["genre"] = genero
+
+        try:
+            response = requests.post(url, json={"query": query, "variables": variables}, timeout=10)
+            if response.status_code == 200:
+                dados = response.json().get("data", {}).get("Page", {}).get("media", [])
+                for anime in dados:
+                    cover_url = anime.get("coverImage", {}).get("large")
+                    anime["pil_image"] = self.baixar_imagem(cover_url)
+                self.after(0, lambda: self.renderizar_cards(dados))
+        except Exception as e:
+            self.after(0, lambda: self.exibir_erro(f"Erro ao buscar explorar: {e}"))
+
+    # ================= 5. ABA: POPULARES =================
+    def carregar_populares_3_meses(self):
+        self.mostrar_loading()
+        threading.Thread(target=self.api_buscar_populares, daemon=True).start()
+
+    def api_buscar_populares(self):
+        data_3_meses_atras = datetime.date.today() - datetime.timedelta(days=90)
+        start_date_int = int(data_3_meses_atras.strftime("%Y%m%d"))
+
+        url = "https://graphql.anilist.co"
+        query = """
+        query ($startDate: Int) {
+          Page(page: 1, perPage: 24) {
+            media(startDate_greater: $startDate, type: ANIME, sort: [SCORE_DESC, POPULARITY_DESC]) {
+              id
+              title { english romaji native }
+              coverImage { extraLarge large }
+              averageScore
+              episodes
+              genres
+              description(asHtml: false)
+              trailer { id site }
+              nextAiringEpisode { airingAt episode }
+            }
+          }
+        }
+        """
+        try:
+            response = requests.post(url, json={"query": query, "variables": {"startDate": start_date_int}}, timeout=10)
+            if response.status_code == 200:
+                dados = response.json().get("data", {}).get("Page", {}).get("media", [])
+                for anime in dados:
+                    cover_url = anime.get("coverImage", {}).get("large")
+                    anime["pil_image"] = self.baixar_imagem(cover_url)
+                self.after(0, lambda: self.renderizar_cards(dados))
+        except Exception as e:
+            self.after(0, lambda: self.exibir_erro(f"Erro ao buscar populares: {e}"))
+
+    # ================= 6. ABA: CONFIGURAÇÕES =================
+    def setup_tela_configuracoes(self):
+        frame_config = ctk.CTkFrame(self.scroll_cards, fg_color=self.COLOR_CARD, corner_radius=12)
+        frame_config.pack(fill="x", padx=20, pady=20)
+
+        lbl_titulo = ctk.CTkLabel(
+            frame_config, 
+            text="Personalização Visual", 
+            font=ctk.CTkFont(size=16, weight="bold"),
+            text_color=self.COLOR_TEXT_MAIN
+        )
+        lbl_titulo.pack(anchor="w", padx=20, pady=(20, 15))
+
+        lbl_cor = ctk.CTkLabel(frame_config, text="Cor de Fundo da Aplicação:", text_color=self.COLOR_TEXT_MUTED)
+        lbl_cor.pack(anchor="w", padx=20, pady=(0, 5))
+
+        cores = [
+            ("Escuro Padrão", "#0B0E14"),
+            ("Preto Puro", "#000000"),
+            ("Azul Noturno", "#0A1128"),
+            ("Cinza Chumbo", "#18181B"),
+            ("Roxo Escuro", "#130E26")
+        ]
+
+        frame_botoes_cor = ctk.CTkFrame(frame_config, fg_color="transparent")
+        frame_botoes_cor.pack(anchor="w", padx=20, pady=(0, 20))
+
+        for nome, hex_code in cores:
+            btn_c = ctk.CTkButton(
+                frame_botoes_cor,
+                text=nome,
+                fg_color=hex_code,
+                hover_color="#334155",
+                width=100,
+                command=lambda c=hex_code: self.alterar_cor_fundo(c)
+            )
+            btn_c.pack(side="left", padx=5)
+
+        lbl_tema = ctk.CTkLabel(frame_config, text="Modo de Exibição:", text_color=self.COLOR_TEXT_MUTED)
+        lbl_tema.pack(anchor="w", padx=20, pady=(10, 5))
+
+        switch_tema = ctk.CTkOptionMenu(
+            frame_config,
+            values=["Dark", "Light", "System"],
+            command=lambda modo: ctk.set_appearance_mode(modo),
+            fg_color="#243044",
+            button_color=self.COLOR_ACCENT
+        )
+        switch_tema.pack(anchor="w", padx=20, pady=(0, 20))
+
+    def alterar_cor_fundo(self, nova_cor_hex):
+        self.COLOR_BG = nova_cor_hex
+        self.configure(fg_color=self.COLOR_BG)
+
+    # ================= UTILITÁRIOS E AUXILIARES =================
+    def mostrar_loading(self):
+        for widget in self.scroll_cards.winfo_children():
+            widget.destroy()
+        lbl_loading = ctk.CTkLabel(
+            self.scroll_cards,
+            text="⏳ Carregando dados...",
+            font=ctk.CTkFont(size=16),
+            text_color=self.COLOR_TEXT_MUTED,
+        )
+        lbl_loading.grid(row=0, column=0, columnspan=4, pady=50)
+
+    def baixar_imagem(self, url):
         if not url:
             return None
         try:
@@ -228,238 +511,197 @@ class AppPainelRedimensionavel(ctk.CTk):
             pass
         return None
 
-    def exibir_animes(self, lista_animes, nome_dia):
-        """Renderiza os retângulos dos animes com clique habilitado."""
-        if lista_animes:
-            titulo_txt = f"📅 Animes de {nome_dia} ({len(lista_animes)} encontrados)"
-        else:
-            titulo_txt = f"📅 Nenhum anime agendado para {nome_dia} no momento."
+    def exibir_erro(self, mensagem):
+        for widget in self.scroll_cards.winfo_children():
+            widget.destroy()
+        lbl_err = ctk.CTkLabel(
+            self.scroll_cards, text=mensagem, text_color="#EF4444"
+        )
+        lbl_err.grid(row=0, column=0, columnspan=4, pady=40)
 
-        self.lbl_main.configure(text=titulo_txt)
+    # ================= RENDERIZAÇÃO DOS CARDS =================
+    def renderizar_cards(self, lista_animes, modo_meu_calendario=False):
+        for widget in self.scroll_cards.winfo_children():
+            widget.destroy()
 
-        for anime in lista_animes:
-            titles = anime.get("title", {})
-            titulo = titles.get("english") or titles.get("romaji") or "Sem Título"
+        if not lista_animes:
+            texto_vazio = (
+                "Sua lista está vazia! Adicione animes aos favoritos no Dashboard para acompanhá-los aqui."
+                if modo_meu_calendario else
+                "Nenhum anime encontrado para este filtro."
+            )
+            lbl_vazio = ctk.CTkLabel(
+                self.scroll_cards,
+                text=texto_vazio,
+                font=ctk.CTkFont(size=14),
+                text_color=self.COLOR_TEXT_MUTED,
+            )
+            lbl_vazio.grid(row=0, column=0, columnspan=4, pady=50)
+            return
 
-            score = anime.get("averageScore")
-            nota = f"{score / 10:.1f}" if score else "N/A"
+        col_max = 4
+        for index, anime in enumerate(lista_animes):
+            row = index // col_max
+            col = index % col_max
 
-            episodes = anime.get("episodes") or "Em exibição"
-            generos = ", ".join(anime.get("genres", [])[:3]) or "Geral"
+            card = ctk.CTkFrame(
+                self.scroll_cards,
+                fg_color=self.COLOR_CARD,
+                corner_radius=12,
+                cursor="hand2",
+            )
+            card.grid(row=row, column=col, padx=8, pady=10, sticky="nsew")
 
-            next_ep = anime.get("nextAiringEpisode")
-            ep_info = f"Episódio {next_ep['episode']}" if next_ep else "Lançamento em dia"
-
-            # CARD RETANGULAR
-            card = ctk.CTkFrame(self.scroll_frame, corner_radius=10, cursor="hand2")
-            card.pack(fill="x", pady=8, padx=5)
-
-            card.grid_columnconfigure(1, weight=1)
-
-            # Capa
+            # Imagem de Capa
             pil_img = anime.get("pil_image")
             if pil_img:
                 ctk_img = ctk.CTkImage(
-                    light_image=pil_img, dark_image=pil_img, size=(110, 155)
+                    light_image=pil_img, dark_image=pil_img, size=(180, 240)
                 )
-                lbl_foto = ctk.CTkLabel(card, image=ctk_img, text="")
+                lbl_cover = ctk.CTkLabel(card, image=ctk_img, text="")
             else:
-                lbl_foto = ctk.CTkLabel(
+                lbl_cover = ctk.CTkLabel(
                     card,
-                    text="🖼️\nSem Foto",
-                    width=110,
-                    height=155,
-                    fg_color="#1f2937",
-                    corner_radius=6,
+                    text="Sem Imagem",
+                    width=180,
+                    height=240,
+                    fg_color="#1E293B",
+                    corner_radius=8,
                 )
+            lbl_cover.pack(padx=10, pady=(10, 8))
 
-            lbl_foto.grid(row=0, column=0, padx=12, pady=12, sticky="n")
+            # Título do Anime
+            titles = anime.get("title", {})
+            titulo = titles.get("english") or titles.get("romaji") or "Sem Título"
 
-            # Área de textos
-            info_frame = ctk.CTkFrame(card, fg_color="transparent")
-            info_frame.grid(row=0, column=1, padx=(0, 12), pady=12, sticky="nsew")
-
-            lbl_titulo = ctk.CTkLabel(
-                info_frame,
+            lbl_title = ctk.CTkLabel(
+                card,
                 text=titulo,
-                font=ctk.CTkFont(size=16, weight="bold"),
-                anchor="w",
-                justify="left",
-                wraplength=420,
+                font=ctk.CTkFont(size=13, weight="bold"),
+                text_color=self.COLOR_TEXT_MAIN,
+                wraplength=170,
+                justify="center",
             )
-            lbl_titulo.pack(fill="x", anchor="w", pady=(0, 4))
+            lbl_title.pack(padx=8, pady=(0, 2))
 
-            lbl_nota = ctk.CTkLabel(
-                info_frame,
-                text=f"⭐ Avaliação: {nota} / 10 | 📺 Total Eps: {episodes}",
-                font=ctk.CTkFont(size=13),
-                anchor="w",
+            # Informações do Episódio / Nota
+            next_ep = anime.get("nextAiringEpisode")
+            ep_txt = f"EP {next_ep['episode']}" if next_ep else "Lançado / Em breve"
+
+            lbl_info = ctk.CTkLabel(
+                card,
+                text=ep_txt,
+                font=ctk.CTkFont(size=11),
+                text_color=self.COLOR_TEXT_MUTED,
             )
-            lbl_nota.pack(fill="x", anchor="w", pady=2)
+            lbl_info.pack(padx=8, pady=(0, 4))
 
-            lbl_proximo = ctk.CTkLabel(
-                info_frame,
-                text=f"🚀 Próximo: {ep_info} | 🏷️ Gêneros: {generos}",
-                font=ctk.CTkFont(size=12),
-                text_color="#9ca3af",
-                anchor="w",
-            )
-            lbl_proximo.pack(fill="x", anchor="w", pady=2)
+            # BOTÕES DE AÇÃO (Favoritar e Assistido)
+            frame_acoes = ctk.CTkFrame(card, fg_color="transparent")
+            frame_acoes.pack(fill="x", padx=8, pady=(0, 10))
 
-            # Botão de Ação para Detalhes
-            btn_detalhes = ctk.CTkButton(
-                info_frame,
-                text="🔍 Ver Onde Assistir & Detalhes",
-                height=28,
-                fg_color="#2563eb",
-                hover_color="#1d4ed8",
-                command=lambda a=anime: self.abrir_modal_detalhes(a),
-            )
-            btn_detalhes.pack(anchor="w", pady=(8, 0))
+            is_fav = anime["id"] in self.favoritos
 
-            # Torna o card inteiro clicável
-            card.bind("<Button-1>", lambda e, a=anime: self.abrir_modal_detalhes(a))
-            lbl_foto.bind("<Button-1>", lambda e, a=anime: self.abrir_modal_detalhes(a))
-            info_frame.bind("<Button-1>", lambda e, a=anime: self.abrir_modal_detalhes(a))
+            if modo_meu_calendario:
+                # Na aba "Meu Calendário": Botão para marcar como Assistido (remover da lista)
+                btn_assistido = ctk.CTkButton(
+                    frame_acoes,
+                    text="✅ Assistido",
+                    height=30,
+                    fg_color="#10B981",
+                    hover_color="#059669",
+                    font=ctk.CTkFont(size=11, weight="bold"),
+                    command=lambda a=anime: self.alternar_favorito(a)
+                )
+                btn_assistido.pack(fill="x", expand=True)
+            else:
+                # Nas outras abas: Botão de Favoritar (❤️)
+                btn_fav = ctk.CTkButton(
+                    frame_acoes,
+                    text="❤️ Favorito" if is_fav else "🤍 Favoritar",
+                    height=30,
+                    fg_color="#EC4899" if is_fav else "#334155",
+                    hover_color="#DB2777" if is_fav else "#475569",
+                    font=ctk.CTkFont(size=11, weight="bold"),
+                    command=lambda a=anime, b=card: self.acao_favoritar_card(a)
+                )
+                btn_fav.pack(fill="x", expand=True)
 
-    # ================= POP-UP DE DETALHES (MODAL) =================
+            # Clique no Card/Imagem abre detalhes
+            bind_click = lambda e, a=anime: self.abrir_modal_detalhes(a)
+            card.bind("<Button-1>", bind_click)
+            lbl_cover.bind("<Button-1>", bind_click)
+            lbl_title.bind("<Button-1>", bind_click)
 
+    def acao_favoritar_card(self, anime):
+        self.alternar_favorito(anime)
+        # Se estivéssemos numa listagem normal, recarregamos a aba atual para atualizar as cores dos botões
+        if self.aba_atual == "explorar":
+            self.executar_busca_explorar()
+        elif self.aba_atual == "dashboard":
+            self.selecionar_dia(self.dia_selecionado)
+        elif self.aba_atual == "populares":
+            self.carregar_populares_3_meses()
+
+    # ================= POP-UP DE DETALHES =================
     def abrir_modal_detalhes(self, anime):
-        """Abre uma janela Pop-up com detalhes, trailer e plataformas de streaming."""
         modal = ctk.CTkToplevel(self)
         modal.title("Detalhes do Anime")
-        modal.geometry("700x650")
+        modal.geometry("600x550")
+        modal.configure(fg_color=self.COLOR_BG)
         modal.transient(self)
-        modal.grab_set()  # Foca no Pop-up até fechar
+        modal.grab_set()
 
-        # Frame com scroll no modal
-        scroll_modal = ctk.CTkScrollableFrame(modal)
-        scroll_modal.pack(fill="both", expand=True, padx=15, pady=15)
+        scroll_modal = ctk.CTkScrollableFrame(modal, fg_color="transparent")
+        scroll_modal.pack(fill="both", expand=True, padx=20, pady=20)
 
         titles = anime.get("title", {})
-        titulo_principal = titles.get("english") or titles.get("romaji") or "Sem Título"
-        titulo_nativo = titles.get("native", "")
+        titulo = titles.get("english") or titles.get("romaji") or "Sem Título"
 
-        # 1. TÍTULO
         lbl_modal_titulo = ctk.CTkLabel(
             scroll_modal,
-            text=titulo_principal,
-            font=ctk.CTkFont(size=20, weight="bold"),
-            wraplength=630,
+            text=titulo,
+            font=ctk.CTkFont(size=18, weight="bold"),
+            text_color=self.COLOR_TEXT_MAIN,
+            wraplength=540,
             justify="left",
         )
-        lbl_modal_titulo.pack(anchor="w", pady=(0, 2))
+        lbl_modal_titulo.pack(anchor="w", pady=(0, 10))
 
-        if titulo_nativo:
-            lbl_nativo = ctk.CTkLabel(
-                scroll_modal,
-                text=f"Original: {titulo_nativo}",
-                font=ctk.CTkFont(size=12),
-                text_color="#9ca3af",
-            )
-            lbl_nativo.pack(anchor="w", pady=(0, 10))
-
-        # 2. INFORMAÇÕES TÉCNICAS (GRID)
-        info_tech_frame = ctk.CTkFrame(scroll_modal, fg_color="#1f2937", corner_radius=8)
-        info_tech_frame.pack(fill="x", pady=10, ipady=5)
-
-        score = anime.get("averageScore")
-        nota = f"{score/10:.1f} / 10" if score else "N/A"
-        
-        studios = anime.get("studios", {}).get("nodes", [])
-        estudio_nome = studios[0]["name"] if studios else "Desconhecido"
-        
-        generos = ", ".join(anime.get("genres", [])) or "Geral"
-        ano = anime.get("seasonYear") or "N/A"
-
-        txt_info = (
-            f"⭐ **Nota:** {nota}   |   🏢 **Estúdio:** {estudio_nome}   |   📅 **Ano:** {ano}\n"
-            f"🏷️ **Gêneros:** {generos}"
-        )
-        lbl_info_tech = ctk.CTkLabel(
-            info_tech_frame,
-            text=txt_info,
-            font=ctk.CTkFont(size=13),
-            justify="left",
-            anchor="w",
-        )
-        lbl_info_tech.pack(fill="x", padx=15, pady=8)
-
-        # 3. BOTÃO DE TRAILER (SE HOUVER YOUTUBE)
-        trailer_data = anime.get("trailer")
-        if trailer_data and trailer_data.get("site") == "youtube" and trailer_data.get("id"):
-            youtube_url = f"https://www.youtube.com/watch?v={trailer_data['id']}"
+        trailer = anime.get("trailer")
+        if trailer and trailer.get("site") == "youtube" and trailer.get("id"):
+            youtube_url = f"https://www.youtube.com/watch?v={trailer['id']}"
             btn_trailer = ctk.CTkButton(
                 scroll_modal,
-                text="🎬 Assistir Trailer Oficial no YouTube",
-                fg_color="#dc2626",
-                hover_color="#b91c1c",
+                text="🎬 Assistir Trailer no YouTube",
+                fg_color="#DC2626",
+                hover_color="#B91C1C",
                 font=ctk.CTkFont(weight="bold"),
                 command=lambda: webbrowser.open(youtube_url),
             )
-            btn_trailer.pack(fill="x", pady=10)
+            btn_trailer.pack(fill="x", pady=(0, 15))
 
-        # 4. ONDE ASSISTIR (STREAMING LINKS)
-        lbl_onde = ctk.CTkLabel(
+        lbl_syn_title = ctk.CTkLabel(
             scroll_modal,
-            text="📺 Onde Assistir (Plataformas Oficiais):",
-            font=ctk.CTkFont(size=15, weight="bold"),
+            text="Sinopse:",
+            font=ctk.CTkFont(size=14, weight="bold"),
+            text_color=self.COLOR_ACCENT,
         )
-        lbl_onde.pack(anchor="w", pady=(15, 5))
-
-        links_externos = anime.get("externalLinks", [])
-        # Filtra apenas links de streaming ou oficiais
-        stream_links = [
-            l for l in links_externos if l.get("type") in ["STREAMING", "INFO"] or "Crunchyroll" in l.get("site", "") or "Netflix" in l.get("site", "")
-        ]
-
-        if stream_links:
-            frame_links = ctk.CTkFrame(scroll_modal, fg_color="transparent")
-            frame_links.pack(fill="x", pady=5)
-
-            for link in stream_links:
-                nome_site = link.get("site", "Link")
-                url_site = link.get("url")
-
-                if url_site:
-                    btn_stream = ctk.CTkButton(
-                        frame_links,
-                        text=f"🔗 {nome_site}",
-                        height=32,
-                        fg_color="#059669",
-                        hover_color="#047857",
-                        command=lambda u=url_site: webbrowser.open(u),
-                    )
-                    btn_stream.pack(side="left", padx=4, pady=4)
-        else:
-            lbl_sem_link = ctk.CTkLabel(
-                scroll_modal,
-                text="Nenhuma plataforma de streaming cadastrada diretamente para esta região.",
-                font=ctk.CTkFont(size=12),
-                text_color="#9ca3af",
-            )
-            lbl_sem_link.pack(anchor="w")
-
-        # 5. SINOPSE COMPLETA
-        lbl_sinopse_titulo = ctk.CTkLabel(
-            scroll_modal,
-            text="📖 Sinopse:",
-            font=ctk.CTkFont(size=15, weight="bold"),
-        )
-        lbl_sinopse_titulo.pack(anchor="w", pady=(20, 5))
+        lbl_syn_title.pack(anchor="w", pady=(5, 2))
 
         sinopse_limpa = limpar_html(anime.get("description"))
         lbl_sinopse = ctk.CTkLabel(
             scroll_modal,
             text=sinopse_limpa,
-            font=ctk.CTkFont(size=13),
+            font=ctk.CTkFont(size=12),
+            text_color=self.COLOR_TEXT_MUTED,
             justify="left",
             anchor="w",
-            wraplength=630,
+            wraplength=540,
         )
         lbl_sinopse.pack(fill="x", anchor="w", pady=(0, 15))
 
 
 if __name__ == "__main__":
-    app = AppPainelRedimensionavel()
+    app = AppCalendarioAnime()
     app.mainloop()
